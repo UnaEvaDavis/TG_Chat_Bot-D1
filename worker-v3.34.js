@@ -1,8 +1,7 @@
 /**
- * Telegram Bot Worker v3.33 (Fixed Edition)
- * 修复: 设置备注导致昵称丢失的问题 (数据同步修复)
- * 修复: /start 无反应问题
- * 功能: 全功能保留
+ * Telegram Bot Worker v3.34 (Sync Edition)
+ * 修复: 黑名单解封后，用户话题内的按钮状态未同步更新的问题
+ * 包含: /start 修复、昵称自动同步、全界面状态联动
  */
 
 // --- 1. 静态配置 ---
@@ -34,7 +33,7 @@ export default {
         const url = new URL(req.url);
         if (req.method === "GET") {
             if (url.pathname === "/verify") return handleVerifyPage(url, env);
-            if (url.pathname === "/") return new Response("Bot v3.33 Active", { status: 200 });
+            if (url.pathname === "/") return new Response("Bot v3.34 Active", { status: 200 });
         }
         if (req.method === "POST") {
             if (url.pathname === "/submit_token") return handleTokenSubmit(req, env);
@@ -226,10 +225,9 @@ async function relayToTopic(msg, u, env) {
     const uMeta = getUMeta(msg.from, u, msg.date), uid = u.user_id;
     let tid = u.topic_id;
 
-    // [修复点]：每次收到用户消息，都更新数据库中的昵称和用户名，确保备注时能取到最新数据
+    // [昵称同步修复]
     if (u.user_info.name !== uMeta.name || u.user_info.username !== uMeta.username) {
         await updUser(uid, { user_info: { ...u.user_info, name: uMeta.name, username: uMeta.username } }, env);
-        // 更新本地对象，供后续逻辑使用
         u.user_info.name = uMeta.name;
         u.user_info.username = uMeta.username;
     }
@@ -350,7 +348,6 @@ async function handleAdminReply(msg, env) {
             const u = await getUser(targetUid, env);
             u.user_info.note = msg.text;
             
-            // [修复点] 防止数据库没有名字时导致名片显示为空白
             const mockTgUser = { 
                 id: targetUid, 
                 username: u.user_info.username || "", 
@@ -439,20 +436,37 @@ async function handleCallback(cb, env) {
     if (msg.chat.id.toString() === env.ADMIN_GROUP_ID) { 
         await api(env.BOT_TOKEN, "answerCallbackQuery", { callback_query_id: cb.id });
         if (act === 'pin_card') api(env.BOT_TOKEN, "pinChatMessage", { chat_id: msg.chat.id, message_id: msg.message_id });
+        
+        // [修复: 核心同步逻辑]
         else if (['block','unblock'].includes(act)) {
             const isB = act === 'block';
             const uid = p1;
             const u = await getUser(uid, env);
             const bid = await getCfg('blocked_topic_id', env);
             
-            if (!isB && msg.message_thread_id.toString() === bid) {
-                await api(env.BOT_TOKEN, "deleteMessage", { chat_id: msg.chat.id, message_id: msg.message_id }).catch(()=>{});
+            // 1. 优先更新数据库状态
+            await updUser(uid, { is_blocked: isB, block_count: 0 }, env);
+
+            // 2. 同步更新用户独立话题中的资料卡 (无论在哪里点击，都强制刷新这个卡片)
+            if (u.user_info.card_msg_id) {
+                api(env.BOT_TOKEN, "editMessageReplyMarkup", { 
+                    chat_id: env.ADMIN_GROUP_ID, 
+                    message_id: u.user_info.card_msg_id, 
+                    reply_markup: getBtns(uid, isB) 
+                }).catch(()=>{});
+            }
+
+            // 3. 管理黑名单话题 (添加或移除条目)
+            await manageBlacklist(env, u, { id: uid, username: u.user_info.username, first_name: u.user_info.name }, isB);
+            
+            // 4. 当前界面的交互反馈
+            // 如果是在黑名单话题点击了解封，消息会被 manageBlacklist 删掉，所以只弹窗
+            if (!isB && msg.message_thread_id && bid && msg.message_thread_id.toString() === bid) {
+                 api(env.BOT_TOKEN, "answerCallbackQuery", { callback_query_id: cb.id, text: "✅ 已解除屏蔽" });
             } else {
-                api(env.BOT_TOKEN, "editMessageReplyMarkup", { chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: getBtns(uid, isB) });
+                // 其他情况 (用户话题内操作，或在任何地方操作封禁)，发送文本反馈
                 api(env.BOT_TOKEN, "sendMessage", { chat_id: msg.chat.id, message_thread_id: msg.message_thread_id, text: isB ? "❌ 已屏蔽" : "✅ 已解封" });
             }
-            await updUser(uid, { is_blocked: isB, block_count: 0 }, env);
-            await manageBlacklist(env, u, { id: uid, username: u.user_info.username, first_name: u.user_info.name }, isB);
         }
     }
 }
