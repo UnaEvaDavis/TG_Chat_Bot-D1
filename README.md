@@ -103,8 +103,10 @@
     | `WORKER_URL` | `https://xxx.workers.dev` | 你的 Worker 完整访问链接 (不带末尾斜杠) |
     | `TURNSTILE_SITE_KEY` | `0x4AAAA...` | 步骤四获取的站点密钥 |
     | `TURNSTILE_SECRET_KEY` | `0x4AAAA...` | 步骤四获取的密钥 |
+    | `RECAPTCHA_SITE_KEY` | `6LAAAAABBCCDDBGHYDD_cDmgjUtEbpF` | 密钥自行谷歌 `reCAPTCHA v2` 创建 |
+    | `RECAPTCHA_SECRET_KEY` | `6LAAAAABDDCCFGTTH-AIMK6z-H4aE` | 密钥自行谷歌 `reCAPTCHA v2` 创建 |
 
-2.  点击 **部署 (Deploy)** 使代码和配置生效。
+3.  点击 **部署 (Deploy)** 使代码和配置生效。
 
 ### 步骤六：设置 Webhook
 
